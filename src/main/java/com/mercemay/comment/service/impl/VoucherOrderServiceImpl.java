@@ -1,5 +1,6 @@
 package com.mercemay.comment.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.mercemay.comment.dto.Result;
 import com.mercemay.comment.entity.SeckillVoucher;
@@ -16,6 +17,7 @@ import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.connection.stream.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -23,8 +25,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -210,43 +215,146 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     //     }
     // }
 
-    // 秒杀+一人一单，使用Lua脚本实现原子操作，然后把下单请求放入阻塞队列中，异步处理
-    @Override
-    public Result seckillVoucher(Long voucherId) {
-        Long userId = UserHolder.getUser().getId();
-        Long result = stringRedisTemplate.execute(
-                SECKILL_SCRIPT,
-                Collections.emptyList(),
-                voucherId.toString(), userId.toString());
-        int r = result.intValue();
-        if (r != 0) {
-            return Result.fail(r == 1 ? "优惠券已经被抢光了，下次早点来哦" : "不允许重复下单");
-        }
-        // 创建订单对象
-        VoucherOrder voucherOrder = new VoucherOrder();
-        long orderID = redisIdWorker.nextId("order");
-        voucherOrder.setId(orderID);
-        voucherOrder.setUserId(userId);
-        voucherOrder.setVoucherId(voucherId);
-        // 放入阻塞队列
-        orderTasks.add(voucherOrder);
-        // 获取代理对象
-        this.proxy = (IVoucherOrderService) AopContext.currentProxy();
-        // 返回订单ID
-        return Result.ok(orderID);
-    }
+    // /**
+    //  * 阻塞队列实现异步下单
+    //  *
+    //  */
+    // // 秒杀+一人一单，使用Lua脚本实现原子操作，然后把下单请求放入阻塞队列中，异步处理
+    // @Override
+    // public Result seckillVoucher(Long voucherId) {
+    //     Long userId = UserHolder.getUser().getId();
+    //     Long result = stringRedisTemplate.execute(
+    //             SECKILL_SCRIPT,
+    //             Collections.emptyList(),
+    //             voucherId.toString(), userId.toString());
+    //     int r = result.intValue();
+    //     if (r != 0) {
+    //         return Result.fail(r == 1 ? "优惠券已经被抢光了，下次早点来哦" : "不允许重复下单");
+    //     }
+    //     // 创建订单对象
+    //     VoucherOrder voucherOrder = new VoucherOrder();
+    //     long orderID = redisIdWorker.nextId("order");
+    //     voucherOrder.setId(orderID);
+    //     voucherOrder.setUserId(userId);
+    //     voucherOrder.setVoucherId(voucherId);
+    //     // 放入阻塞队列
+    //     orderTasks.add(voucherOrder);
+    //     // 获取代理对象
+    //     this.proxy = (IVoucherOrderService) AopContext.currentProxy();
+    //     // 返回订单ID
+    //     return Result.ok(orderID);
+    // }
+    //
+    //
+    // // 下面的内容是异步处理下单请求的代码
+    // private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
+    // static {
+    //     SECKILL_SCRIPT = new DefaultRedisScript<>();
+    //     SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
+    //     SECKILL_SCRIPT.setResultType(Long.class);
+    // }
+    //
+    // // 阻塞队列
+    // private BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
+    // // 创建线程池
+    // private static final ExecutorService SECKILL_ORDER_EXECUTOR =
+    //         Executors.newSingleThreadExecutor();
+    //
+    // // 在类初始化后执行
+    // @PostConstruct
+    // private void init() {
+    //     SECKILL_ORDER_EXECUTOR.submit(new VoucherOrderHandler());
+    // }
+    //
+    //
+    // // 内部类：处理异步下单请求，把下单请求从队列中取出并写入数据库
+    // private class VoucherOrderHandler implements Runnable {
+    //     @Override
+    //     public void run() {
+    //         while (true) {
+    //             try {
+    //                 VoucherOrder voucherOrder = orderTasks.take();
+    //                 handleVoucherOrder(voucherOrder);
+    //             } catch (Exception e) {
+    //                 log.error("处理订单异常", e);
+    //             }
+    //         }
+    //     }
+    // }
+    //
+    // private void handleVoucherOrder(VoucherOrder voucherOrder) {
+    //     // 获取用户ID
+    //     Long userId = voucherOrder.getId();
+    //     // 创建锁对象
+    //     RLock rLock = redissonClient.getLock("order_lock:" + userId);
+    //     boolean isLock = rLock.tryLock();
+    //     if (!isLock) {
+    //         log.error("不允许重复下单");
+    //         return;
+    //     }
+    //     try {
+    //         this.proxy.createVoucherOrder(voucherOrder);
+    //     } finally {
+    //         rLock.unlock();
+    //     }
+    // }
+    //
+    // private IVoucherOrderService proxy;
+    //
+    //
+    // @Override
+    // public void createVoucherOrder(VoucherOrder voucherOrder) {
+    //     Long userId = voucherOrder.getUserId();
+    //     int count = query().eq("user_id", userId).eq("voucher_id", voucherOrder.getVoucherId()).count();
+    //     if (count > 0) {
+    //         log.error("不允许重复下单"); // 其实这里不会走到，因为Lua脚本已经判断过一人一单
+    //         return;
+    //     }
+    //     boolean success = seckillVoucherService.update()
+    //             .setSql("stock = stock - 1")
+    //             .eq("voucher_id", voucherOrder.getVoucherId())
+    //             .gt("stock", 0)
+    //             .update();
+    //     if (!success) {
+    //         log.error("优惠券已经被抢光了，下次早点来哦"); // 其实这里不会走到，因为Lua脚本已经判断过库存
+    //         return;
+    //     }
+    //     save(voucherOrder);
+    // }
 
 
-    // 下面的内容是异步处理下单请求的代码
+    /**
+     * redis消息队列实现异步下单
+     */
     private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
+
     static {
         SECKILL_SCRIPT = new DefaultRedisScript<>();
         SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
         SECKILL_SCRIPT.setResultType(Long.class);
     }
 
-    // 阻塞队列
-    private BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
+    private IVoucherOrderService proxy;
+
+    // Lua脚本实现秒杀+一人一单+塞入消息队列
+    @Override
+    public Result seckillVoucher(Long voucherId) {
+        Long userId = UserHolder.getUser().getId();
+        long orderID = redisIdWorker.nextId("order");
+        Long result = stringRedisTemplate.execute(
+                SECKILL_SCRIPT,
+                Collections.emptyList(),
+                voucherId.toString(), userId.toString(), String.valueOf(orderID));
+        int r = result.intValue();
+        if (r != 0) {
+            return Result.fail(r == 1 ? "优惠券已经被抢光了，下次早点来哦" : "不允许重复下单");
+        }
+        // 获取代理对象
+        this.proxy = (IVoucherOrderService) AopContext.currentProxy();
+        // 返回订单ID
+        return Result.ok(orderID);
+    }
+
     // 创建线程池
     private static final ExecutorService SECKILL_ORDER_EXECUTOR =
             Executors.newSingleThreadExecutor();
@@ -257,60 +365,77 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         SECKILL_ORDER_EXECUTOR.submit(new VoucherOrderHandler());
     }
 
-
     // 内部类：处理异步下单请求，把下单请求从队列中取出并写入数据库
     private class VoucherOrderHandler implements Runnable {
         @Override
         public void run() {
             while (true) {
                 try {
-                    VoucherOrder voucherOrder = orderTasks.take();
-                    handleVoucherOrder(voucherOrder);
+                    // 获取消息队列中的订单信息 XREADGROUP GROUP g1 c1 COUNT 1 BLOCK 2000 STREAMS s1 >
+                    List<MapRecord<String, Object, Object>> list =
+                            stringRedisTemplate.opsForStream().read(
+                                    // 读取消息队列中的订单信息
+                                    Consumer.from("g1", "c1"), // 消费者组为g1，消费者为c1
+                                    StreamReadOptions.empty().count(1).block(Duration.ofSeconds(2)), // 阻塞2秒
+                                    StreamOffset.create("stream.orders", ReadOffset.lastConsumed()) // 从上次消费的位置开始读取
+                            );
+                    // 判断订单信息是否为空
+                    if (list == null || list.isEmpty()) {
+                        // 如果为空，说明没有消息，继续下一次循环
+                        continue;
+                    }
+                    MapRecord<String, Object, Object> mapRecord = list.get(0); // 获取订单信息
+                    Map<Object, Object> map = mapRecord.getValue();
+                    VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(map, new VoucherOrder(), true); // 将订单信息转换为VoucherOrder对象
+                    // 创建订单
+                    createVoucherOrder(voucherOrder);
+                    // 确认消息已经被消费 XACK
+                    stringRedisTemplate.opsForStream().acknowledge("s1", "g1", mapRecord.getId()); // 消息队列为s1，消费者组为g1
                 } catch (Exception e) {
                     log.error("处理订单异常", e);
+                    handlePendingList();
                 }
             }
         }
     }
 
-    private void handleVoucherOrder(VoucherOrder voucherOrder) {
-        // 获取用户ID
-        Long userId = voucherOrder.getId();
-        // 创建锁对象
-        RLock rLock = redissonClient.getLock("order_lock:" + userId);
-        boolean isLock = rLock.tryLock();
-        if (!isLock) {
-            log.error("不允许重复下单");
-            return;
-        }
-        try {
-            this.proxy.createVoucherOrder(voucherOrder);
-        } finally {
-            rLock.unlock();
-        }
-    }
-
-    private IVoucherOrderService proxy;
-
-
     @Override
     public void createVoucherOrder(VoucherOrder voucherOrder) {
-        Long userId = voucherOrder.getUserId();
-        int count = query().eq("user_id", userId).eq("voucher_id", voucherOrder.getVoucherId()).count();
-        if (count > 0) {
-            log.error("不允许重复下单"); // 其实这里不会走到，因为Lua脚本已经判断过一人一单
-            return;
+
+    }
+
+    private void handlePendingList() {
+        while (true) {
+            try {
+                // 获取pending-list中的订单信息 XREADGROUP GROUP g1 c1 COUNT 1 BLOCK 2000 STREAMS s1 0
+                List<MapRecord<String, Object, Object>> list =
+                        stringRedisTemplate.opsForStream().read(
+                                // 读取消息队列中的订单信息
+                                Consumer.from("g1", "c1"), // 消费者组为g1，消费者为c1
+                                StreamReadOptions.empty().count(1), // 不阻塞
+                                StreamOffset.create("stream.orders", ReadOffset.from("0")) // 从pending-list中读取
+                        );
+                // 判断订单信息是否为空
+                if (list == null || list.isEmpty()) {
+                    // 如果为空，说明pending-list没有消息，结束循环
+                    break;
+                }
+                MapRecord<String, Object, Object> mapRecord = list.get(0); // 获取订单信息
+                Map<Object, Object> map = mapRecord.getValue();
+                VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(map, new VoucherOrder(), true); // 将订单信息转换为VoucherOrder对象
+                // 创建订单
+                createVoucherOrder(voucherOrder);
+                // 确认消息已经被消费 XACK
+                stringRedisTemplate.opsForStream().acknowledge("s1", "g1", mapRecord.getId()); // 消息队列为s1，消费者组为g1
+            } catch (Exception e) {
+                log.error("处理pendig-list订单异常", e);
+                try {
+                    Thread.sleep(20);
+                } catch (InterruptedException e1) {
+                    e1.printStackTrace();
+                }
+            }
         }
-        boolean success = seckillVoucherService.update()
-                .setSql("stock = stock - 1")
-                .eq("voucher_id", voucherOrder.getVoucherId())
-                .gt("stock", 0)
-                .update();
-        if (!success) {
-            log.error("优惠券已经被抢光了，下次早点来哦"); // 其实这里不会走到，因为Lua脚本已经判断过库存
-            return;
-        }
-        save(voucherOrder);
     }
 }
 
