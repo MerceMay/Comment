@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: comment
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/comment?allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: 123456
+  redis:
+    host: localhost
+    port: 6379
+    password:
+    lettuce:
+      pool:
+        max-active: 10
+        max-idle: 10
+        min-idle: 1
+        time-between-eviction-runs: 10s
+  jackson:
+    default-property-inclusion: non_null # 忽略null字段
+mybatis-plus:
+  type-aliases-package: com.mercemay.comment.entity
+logging:
+  level:
+    com.mercemay.comment: debug
