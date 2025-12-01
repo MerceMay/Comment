@@ -33,3 +33,6 @@ mybatis-plus:
 logging:
   level:
     com.mercemay.comment: debug
+
+images:
+  path: F:/Documents/Code/Java/Comment/volumes/nginx/html/hmdp/imgs/
