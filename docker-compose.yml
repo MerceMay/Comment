@@ -30,3 +30,33 @@ services:
       - ./volumes/nginx/conf:/etc/nginx
     environment:
       - TZ=Asia/Shanghai
+
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka_container
+    ports:
+      - "9092:9092"
+    environment:
+      # 1. 节点标识
+      KAFKA_NODE_ID: 1
+      # 2. 角色配置 (KRaft 模式核心：既是 Broker 也是 Controller)
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      # 3. 监听器配置
+      # CONTROLLER: 集群内部通信 (9093)
+      # PLAINTEXT: 外部/客户端通信 (9092)
+      KAFKA_LISTENERS: 'PLAINTEXT://:9092,CONTROLLER://:9093'
+      # 4. 广播地址 (重要！告诉外部 SpringBoot 如何连接)
+      # 如果你在本地运行，localhost 是对的。如果是云服务器，填公网 IP。
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092'
+      # 5. 安全协议映射
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      # 6. 控制器选举投票节点 (只有自己)
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
+      # 7. 指定控制器监听器名称
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      # 8. 集群 ID (刚才生成的 UUID 填在这里)
+      KAFKA_CLUSTER_ID: 'CjPY_lPDT_SeZQEO7W4Tow'
+      # 9. 自动创建 Topic 允许 (开发环境建议开启)
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      # 10. 自动创建 Topic 的默认分区数 (建议改为 3，默认 1 太少了)
+      KAFKA_NUM_PARTITIONS: 3
