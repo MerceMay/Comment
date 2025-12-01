@@ -1,7 +1,6 @@
 package com.mercemay.comment;
 
 import com.mercemay.comment.entity.Shop;
-import com.mercemay.comment.service.IShopService;
 import com.mercemay.comment.service.impl.ShopServiceImpl;
 import com.mercemay.comment.utils.RedisIdWorker;
 import org.junit.jupiter.api.Test;
@@ -97,5 +96,20 @@ class CommentApplicationTests {
             }
             stringRedisTemplate.opsForGeo().add(key, locations);
         }
+    }
+
+    @Test
+    void testHyperLogLog() {
+        String[] users = new String[1000];
+        int index = 0;
+        for (int i = 0; i <= 100000; i++){
+            users[index++] = "user_" + i;
+            if (index == 1000){
+                index = 0;
+                stringRedisTemplate.opsForHyperLogLog().add("test:hll", users); // 把数组添加到HyperLogLog
+            }
+        }
+        Long size = stringRedisTemplate.opsForHyperLogLog().size("test:hll");
+        System.out.println("Estimated unique count: " + size);
     }
 }
