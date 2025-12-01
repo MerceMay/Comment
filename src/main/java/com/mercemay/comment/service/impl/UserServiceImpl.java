@@ -12,15 +12,19 @@ import com.mercemay.comment.entity.User;
 import com.mercemay.comment.mapper.UserMapper;
 import com.mercemay.comment.service.IUserService;
 import com.mercemay.comment.utils.RegexUtils;
+import com.mercemay.comment.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.servlet.http.HttpSession;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -90,12 +94,56 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Override
     public Result sign() {
-        return null;
+        // 1.获取当前的登录的用户
+        Long userId = UserHolder.getUser().getId();
+        // 2.截取日期
+        LocalDateTime now = LocalDateTime.now();
+        // 3.拼接 key
+        String keySuffix = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
+        String key = USER_SIGN_KEY + userId + keySuffix;
+        // 4. 获取今日日期
+        int dayOfMonth = now.getDayOfMonth();
+        // 5.写入 Redis SETBIT key offset 1
+        stringRedisTemplate.opsForValue().setBit(key, dayOfMonth - 1, true);
+        return Result.ok();
     }
 
     @Override
     public Result signCount() {
-        return null;
+        // 1.获取当前的登录的用户
+        Long userId = UserHolder.getUser().getId();
+        // 2.截取日期
+        LocalDateTime now = LocalDateTime.now();
+        // 3.拼接 key
+        String keySuffix = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
+        String key = USER_SIGN_KEY + userId + keySuffix;
+        // 4. 获取今日日期
+        int dayOfMonth = now.getDayOfMonth();
+        // 5.获取本月截止今日位置的所有签到记录
+        List<Long> result = stringRedisTemplate.opsForValue().bitField(
+                key,
+                BitFieldSubCommands.create()
+                        .get(BitFieldSubCommands.BitFieldType.unsigned(dayOfMonth)).valueAt(0)
+        );
+        if (result == null || result.isEmpty()) {
+            // 没有任何签到结果
+            return Result.ok(0);
+        }
+        Long num = result.get(0);
+        if (num == null || num == 0) {
+            return Result.ok(0);
+        }
+        // 6.循环遍历
+        int count = 0;
+        // 为0，说明未签到，结束
+        // 不为0，说明已签到，计数器 +1
+        while ((num & 1) != 0) {
+            // 让数字与 1 作与运算，得到数字钟的最后一个 bit 位 // 判断 bit 位是否为0
+            count++;
+            // 数字右移一维，排期最后一个 bit 位，继续下一个 bit 位
+            num >>>= 1;
+        }
+        return Result.ok(count);
     }
 
     private User createUserWithPhone(String phone) {

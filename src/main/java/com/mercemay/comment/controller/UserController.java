@@ -1,7 +1,6 @@
 package com.mercemay.comment.controller;
 
 import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.util.RandomUtil;
 import com.mercemay.comment.dto.LoginFormDTO;
 import com.mercemay.comment.dto.Result;
 import com.mercemay.comment.dto.UserDTO;
@@ -9,7 +8,6 @@ import com.mercemay.comment.entity.User;
 import com.mercemay.comment.entity.UserInfo;
 import com.mercemay.comment.service.IUserInfoService;
 import com.mercemay.comment.service.IUserService;
-import com.mercemay.comment.utils.RegexUtils;
 import com.mercemay.comment.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -87,5 +85,15 @@ public class UserController {
         }
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
         return Result.ok(userDTO);
+    }
+
+    @PostMapping("/sign")
+    public Result sign() {
+        return userService.sign();
+    }
+
+    @GetMapping("/sign/count")
+    public Result signCount() {
+        return userService.signCount();
     }
 }
